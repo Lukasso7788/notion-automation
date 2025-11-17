@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import json
+import re
 
 # === LOAD ENV ===
 load_dotenv()
@@ -15,14 +16,18 @@ STRATEGY_DB_ID = os.getenv("STRATEGY_DB_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Kyiv")
 
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "google/gemini-1.5-flash")
+
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
     "Notion-Version": "2022-06-28",
     "Content-Type": "application/json"
 }
 
+
 # ---------------------------------------------------------
-# 🔧 BASIC NOTION API UTILITIES
+# 🔧 NOTION API
 # ---------------------------------------------------------
 def query_database(db_id, payload=None):
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -40,10 +45,7 @@ def update_page(page_id, payload):
 
 def create_page(db_id, properties, children=None):
     url = "https://api.notion.com/v1/pages"
-    body = {
-        "parent": {"database_id": db_id},
-        "properties": properties
-    }
+    body = {"parent": {"database_id": db_id}, "properties": properties}
     if children:
         body["children"] = children
     res = requests.post(url, headers=HEADERS, json=body)
@@ -64,17 +66,14 @@ def get_today():
 # ---------------------------------------------------------
 def get_tasks_for_date(date):
     payload = {
-        "filter": {
-            "property": "Date",
-            "date": {"equals": date.isoformat()}
-        }
+        "filter": {"property": "Date", "date": {"equals": date.isoformat()}}
     }
     data = query_database(TASKS_DB_ID, payload)
     return data["results"]
 
 
 # ---------------------------------------------------------
-# 🔁 AUTO-ROLL — переносим невыполненные задачи
+# 🔁 AUTO-ROLL
 # ---------------------------------------------------------
 def auto_roll_tasks(tasks):
     today = get_today()
@@ -89,13 +88,10 @@ def auto_roll_tasks(tasks):
 
         if status == "Done":
             continue
-
         if not auto_roll_flag:
             continue
 
         page_id = task["id"]
-
-        # SAFE rollovers value
         current_rollovers = props.get("Rollovers", {}).get("number") or 0
 
         update_page(page_id, {
@@ -147,39 +143,59 @@ def calculate_stats(tasks):
 
 
 # ---------------------------------------------------------
+# 🧼 CLEAN SUMMARY TEXT
+# ---------------------------------------------------------
+def clean_summary(text):
+    if not text:
+        return "Сегодня спокойно отработал. Завтра продолжаем в том же духе!"
+
+    # удаляем битые токены
+    text = re.sub(r'[^\x00-\x7Fа-яА-ЯёЁіІїЇєЄ0-9\s.,!?;:()\-]+', '', text)
+
+    # убираем двойные пробелы
+    text = re.sub(r'\s{2,}', ' ', text)
+
+    return text[:1800].strip()
+
+
+# ---------------------------------------------------------
 # 🧠 AI SUMMARY
 # ---------------------------------------------------------
 def generate_ai_summary(stats):
     import openai
 
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-    model = os.getenv("MODEL_NAME", "meta-llama/llama-3.1-8b-instruct")
-
-    client = openai.OpenAI(base_url=base_url, api_key=openai.api_key)
+    client = openai.OpenAI(
+        api_key=OPENAI_API_KEY,
+        base_url=OPENROUTER_BASE_URL
+    )
 
     prompt = f"""
-Ты — мой ИИ-коуч. Вот статистика дня:
+Ты — мой ИИ-коуч. Короткое, чистое summary дня:
 
-Всего задач: {stats['total']}
-Выполнено: {stats['done']}
-Плановое время: {stats['planned_min']} мин
-Реальное время: {stats['actual_min']} мин
-Deep work: {stats['deep_work_min']} мин
+Статистика:
+- Всего задач: {stats['total']}
+- Выполнено: {stats['done']}
+- Плановое время: {stats['planned_min']} мин
+- Реальное время: {stats['actual_min']} мин
+- Deep work: {stats['deep_work_min']} мин
 
-Сделай короткое summary:
-1) Похвала или мягкое подталкивание.
+Формат:
+1) Похвала / подталкивание.
 2) Мотивация.
-3) 3 рекомендации на завтра.
+3) 3 улучшения для завтра.
+
+Пиши чистым русским языком, без смеси токенов, без ошибок, без иностранных вставок.
 """
 
     response = client.chat.completions.create(
-        model=model,
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=250,
+        temperature=0.3
     )
 
-    return response.choices[0].message.content
+    summary = response.choices[0].message.content
+    return clean_summary(summary)
 
 
 # ---------------------------------------------------------
@@ -214,16 +230,25 @@ def create_daily_log(stats, summary):
         "Planned min": {"number": stats["planned_min"]},
         "Actual min": {"number": stats["actual_min"]},
         "Deep work min": {"number": stats["deep_work_min"]},
-        "Raw data (JSON)": {"rich_text": [{"text": {"content": json.dumps(stats)}}]}
+        "Raw data (JSON)": {
+            "rich_text": [{"text": {"content": json.dumps(stats)}}]
+        }
     }
 
-    children = [{
-        "object": "block",
-        "type": "paragraph",
-        "paragraph": {
-            "rich_text": [{"type": "text", "text": {"content": summary}}]
+    children = [
+        {
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "text": {"content": summary}
+                    }
+                ]
+            }
         }
-    }]
+    ]
 
     return create_page(DAILY_LOG_DB_ID, properties, children)
 
