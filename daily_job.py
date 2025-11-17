@@ -21,7 +21,6 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-
 # ---------------------------------------------------------
 # 🔧 BASIC NOTION API UTILITIES
 # ---------------------------------------------------------
@@ -96,10 +95,13 @@ def auto_roll_tasks(tasks):
 
         page_id = task["id"]
 
+        # SAFE rollovers value
+        current_rollovers = props.get("Rollovers", {}).get("number") or 0
+
         update_page(page_id, {
             "properties": {
                 "Date": {"date": {"start": new_date.isoformat()}},
-                "Rollovers": {"number": props.get("Rollovers", {}).get("number", 0) + 1}
+                "Rollovers": {"number": current_rollovers + 1}
             }
         })
 
@@ -109,7 +111,7 @@ def auto_roll_tasks(tasks):
 
 
 # ---------------------------------------------------------
-# 📊 CALCULATE STATISTICS
+# 📊 CALCULATE STATS
 # ---------------------------------------------------------
 def calculate_stats(tasks):
     total = len(tasks)
@@ -125,16 +127,14 @@ def calculate_stats(tasks):
         if status == "Done":
             done_tasks += 1
 
-        planned = props.get("Planned duration (min)", {}).get("number")
-        actual = props.get("Actual duration (min)", {}).get("number")
+        planned = props.get("Planned duration (min)", {}).get("number") or 0
+        actual = props.get("Actual duration (min)", {}).get("number") or 0
         task_type = props.get("Type", {}).get("select", {}).get("name")
 
-        if planned:
-            planned_min += planned
-        if actual:
-            actual_min += actual
+        planned_min += planned
+        actual_min += actual
 
-        if task_type == "Deep work" and actual:
+        if task_type == "Deep work":
             deep_work_min += actual
 
     return {
@@ -145,10 +145,10 @@ def calculate_stats(tasks):
         "deep_work_min": deep_work_min
     }
 
-# ---------------------------------------------------------
-# 🧠 SUMMARY FROM OPENAI
-# ---------------------------------------------------------
 
+# ---------------------------------------------------------
+# 🧠 AI SUMMARY
+# ---------------------------------------------------------
 def generate_ai_summary(stats):
     import openai
 
@@ -156,10 +156,7 @@ def generate_ai_summary(stats):
     base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     model = os.getenv("MODEL_NAME", "meta-llama/llama-3.1-8b-instruct")
 
-    client = openai.OpenAI(
-        base_url=base_url,
-        api_key=openai.api_key,
-    )
+    client = openai.OpenAI(base_url=base_url, api_key=openai.api_key)
 
     prompt = f"""
 Ты — мой ИИ-коуч. Вот статистика дня:
@@ -173,22 +170,20 @@ Deep work: {stats['deep_work_min']} мин
 Сделай короткое summary:
 1) Похвала или мягкое подталкивание.
 2) Мотивация.
-3) Что улучшить завтра (3 пункта).
+3) 3 рекомендации на завтра.
 """
 
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=250,
-        temperature=0.7,
     )
 
-    # исправленный возврат текста
     return response.choices[0].message.content
 
 
 # ---------------------------------------------------------
-# 🟢 DAY STATUS — AHEAD / ON TRACK / BEHIND
+# 🟢 DAY STATUS
 # ---------------------------------------------------------
 def determine_status(stats):
     if stats["total"] == 0:
@@ -205,7 +200,7 @@ def determine_status(stats):
 
 
 # ---------------------------------------------------------
-# 📝 CREATE DAILY LOG ENTRY
+# 📝 DAILY LOG ENTRY
 # ---------------------------------------------------------
 def create_daily_log(stats, summary):
     today = get_today()
@@ -225,14 +220,16 @@ def create_daily_log(stats, summary):
     children = [{
         "object": "block",
         "type": "paragraph",
-        "paragraph": {"rich_text": [{"type": "text", "text": {"content": summary}}]}
+        "paragraph": {
+            "rich_text": [{"type": "text", "text": {"content": summary}}]
+        }
     }]
 
     return create_page(DAILY_LOG_DB_ID, properties, children)
 
 
 # ---------------------------------------------------------
-# 🚀 MAIN LOGIC
+# 🚀 MAIN
 # ---------------------------------------------------------
 def main():
     today = get_today()
