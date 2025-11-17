@@ -1,0 +1,35 @@
+name: Daily Notion Automation
+
+on:
+  schedule:
+    # каждый день в 23:59 по Киеву = 21:59 UTC
+    - cron: "59 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily job
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          TASKS_DB_ID: ${{ secrets.TASKS_DB_ID }}
+          DAILY_LOG_DB_ID: ${{ secrets.DAILY_LOG_DB_ID }}
+          STRATEGY_DB_ID: ${{ secrets.STRATEGY_DB_ID }}
+          TIMEZONE: Europe/Kyiv
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_BASE_URL: ${{ secrets.OPENROUTER_BASE_URL }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+        run: python daily_job.py
