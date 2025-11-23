@@ -351,7 +351,7 @@ def ai_comment_for_task(task):
 - что важно учесть
 - если задача слишком большая — предложи упрощение.
 
-Ответи ОДНИМ параграфом без переносов строк.
+Ответь ОДНИМ параграфом без переносов строк.
 """
 
     resp = client.chat.completions.create(
@@ -605,13 +605,28 @@ def send_telegram_document(file_path: str, caption: str | None = None):
         print("Telegram sendDocument exception:", e)
 
 
+def _truncate_for_discord(content: str, limit: int = 2000) -> str:
+    """
+    Discord message content must be <= 2000 chars.
+    Обрезаем, если нужно.
+    """
+    if content is None:
+        return ""
+    if len(content) <= limit:
+        return content
+    # небольшой запас под пометку
+    hard_limit = max(0, limit - 20)
+    return content[:hard_limit] + "\n...(truncated)..."
+
+
 def send_discord_message(content: str):
     if not DISCORD_WEBHOOK_URL:
         print("Discord not configured, skipping send_discord_message")
         return
     try:
+        safe_content = _truncate_for_discord(content or "")
         res = requests.post(
-            DISCORD_WEBHOOK_URL, json={"content": content}, timeout=15
+            DISCORD_WEBHOOK_URL, json={"content": safe_content}, timeout=15
         )
         if not res.ok:
             print("Discord message error:", res.text)
@@ -628,7 +643,7 @@ def send_discord_file(file_path: str, content: str | None = None):
             files = {"file": f}
             data = {}
             if content:
-                data["content"] = content
+                data["content"] = _truncate_for_discord(content)
             res = requests.post(
                 DISCORD_WEBHOOK_URL, data=data, files=files, timeout=30
             )
@@ -782,12 +797,9 @@ def main():
     print("Summary + plan generated")
 
     # 4) Создаем запись в Daily Log
-    # daily_advice пригодится и здесь, и в docx
-    # поэтому создаём пока пустой, заполним после prepare_tasks_for_tomorrow
-    # но проще: сразу взять daily_advice тут, а потом переиспользовать
-    daily_advice = pick_daily_advice(advice_lines)
+    daily_advice_for_log = pick_daily_advice(advice_lines)
     daily_log_page = create_daily_log(
-        stats, summary, strategy_alignment, plan_list, target_day, daily_advice
+        stats, summary, strategy_alignment, plan_list, target_day, daily_advice_for_log
     )
     print("Daily log created:", daily_log_page.get("id"))
 
