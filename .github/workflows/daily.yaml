@@ -3,7 +3,7 @@ name: Daily Notion Automation
 on:
   schedule:
     # каждый день в 23:59 по Киеву = 21:59 UTC
-    - cron: "59 21 * * *"
+    - cron: "0 23 * * *"
   workflow_dispatch:
 
 jobs:
