@@ -172,7 +172,6 @@ def ensure_daily_recurring_tasks(target_day):
         planned = t["planned"]
         ttype = t["type"]
 
-        # Проверяем, есть ли уже такая задача (Name + Date)
         payload = {
             "filter": {
                 "and": [
@@ -190,9 +189,8 @@ def ensure_daily_recurring_tasks(target_day):
 
         data = query_database(TASKS_DB_ID, payload)
         if data["results"]:
-            continue  # уже есть
+            continue
 
-        # Создаем новую задачу
         props = {
             "Name": {"title": [{"text": {"content": name}}]},
             "Date": {"date": {"start": target_day.isoformat()}},
@@ -214,7 +212,6 @@ def ensure_daily_recurring_tasks(target_day):
 # 🔁 AUTO-ROLL (из целевого дня → завтра)
 # =========================================================
 def auto_roll_tasks(tasks, target_day):
-    """Переносим невыполненные задачи target_day на завтра, если Auto-roll?."""
     tomorrow = target_day + timedelta(days=1)
     rolled_count = 0
 
@@ -280,10 +277,6 @@ def calculate_stats(tasks):
 # 📚 STRATEGY SNAPSHOT
 # =========================================================
 def load_strategy_snapshot():
-    """
-    Достаём краткий список стратегий из базы STRATEGY_DB_ID.
-    Формат: список строк "Название [Status=X, Priority=Y, Horizon=Z]".
-    """
     if not STRATEGY_DB_ID:
         return "Нет данных стратегии (STRATEGY_DB_ID не задан)."
 
@@ -308,7 +301,6 @@ def load_strategy_snapshot():
     if not lines:
         return "Стратегия не заполнена."
     return "\n".join(lines[:50])
-
 
 # =========================================================
 # 🧠 AI CLIENT
@@ -378,17 +370,12 @@ def load_advice_lines():
     with open(ADVICE_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
         content = f.read()
 
-    # Разбиваем на строки, убираем мусор
     raw_lines = [clean_text(x) for x in content.split("\n")]
     lines = [x for x in raw_lines if 40 <= len(x) <= 300]
     return lines
 
 
 def pick_daily_advice(lines):
-    """
-    Просто берём одну строку из заметок.
-    Если список пустой — возвращаем пустую строку.
-    """
     import random
 
     if not lines:
@@ -401,7 +388,6 @@ def pick_daily_advice(lines):
 # ---------------------------------------------------------
 def generate_ai_summary_and_plan(stats, target_day, strategy_snapshot):
     client = ai_client()
-    tomorrow = target_day + timedelta(days=1)
 
     prompt = f"""
 Ты — мой персональный ИИ-коуч и стратег.
@@ -414,26 +400,19 @@ def generate_ai_summary_and_plan(stats, target_day, strategy_snapshot):
 
 Твоя задача:
 1) Кратко и чётко описать, как прошёл день.
-2) Оценить, насколько день соответствует долгосрочной стратегии (по ощущениям и по данным).
+2) Оценить, насколько день соответствует долгосрочной стратегии.
 3) Сформировать конкретный план на завтра.
 
-Формат ответа СТРОГО в JSON (без текста вокруг, без markdown):
+Формат ответа СТРОГО в JSON:
 
 {{
-  "summary": "Краткий разбор дня в 3–8 абзацах, без markdown, без эмодзи.",
-  "strategy_alignment": "Как сегодняшний день соотносится со стратегией.",
+  "summary": "Краткий разбор дня.",
+  "strategy_alignment": "Связь дня со стратегией.",
   "plan_tomorrow": [
     "Пункт плана 1",
-    "Пункт плана 2",
-    "Пункт плана 3"
+    "Пункт плана 2"
   ]
 }}
-
-Требования:
-- Никакого markdown (никаких ###, **, ---).
-- Только валидный JSON.
-- "plan_tomorrow" — массив строк, каждая строка — конкретное действие.
-- Пиши по-русски.
 """
 
     resp = client.chat.completions.create(
@@ -443,19 +422,12 @@ def generate_ai_summary_and_plan(stats, target_day, strategy_snapshot):
         temperature=0.4,
     )
 
-    raw = resp.choices[0].message.content
-    raw = raw.strip()
+    raw = resp.choices[0].message.content.strip()
 
-    # Пытаемся распарсить JSON
     try:
         data = json.loads(raw)
     except Exception:
-        # fallback: если модель не соблюла формат
-        return (
-            clean_text(raw),
-            "",
-            [],
-        )
+        return clean_text(raw), "", []
 
     summary = clean_text(data.get("summary", ""))
     strategy_alignment = clean_text(data.get("strategy_alignment", ""))
@@ -480,7 +452,14 @@ def determine_status(stats):
     return "Behind"
 
 
-def create_daily_log(stats, summary, strategy_alignment, plan_list, target_day, daily_advice):
+def create_daily_log(
+    stats,
+    summary,
+    strategy_alignment,
+    plan_list,
+    target_day,
+    daily_advice,
+):
     plan_text = "\n".join(f"- {p}" for p in plan_list) if plan_list else ""
 
     props = {
@@ -492,9 +471,13 @@ def create_daily_log(stats, summary, strategy_alignment, plan_list, target_day, 
         "Planned min": {"number": stats["planned_min"]},
         "Actual min": {"number": stats["actual_min"]},
         "Deep work min": {"number": stats["deep_work_min"]},
-        "AI plan for tomorrow": {"rich_text": [{"text": {"content": plan_text}}]},
+        "AI plan for tomorrow": {
+            "rich_text": [{"text": {"content": plan_text}}]
+        },
         "Raw data (JSON)": {
-            "rich_text": [{"text": {"content": json.dumps(stats, ensure_ascii=False)}}]
+            "rich_text": [
+                {"text": {"content": json.dumps(stats, ensure_ascii=False)}}
+            ]
         },
     }
 
@@ -506,59 +489,60 @@ def create_daily_log(stats, summary, strategy_alignment, plan_list, target_day, 
                 "object": "block",
                 "type": "paragraph",
                 "paragraph": {
-                    "rich_text": [
-                        {"type": "text", "text": {"content": summary}}
-                    ]
+                    "rich_text": [{"type": "text", "text": {"content": summary}}]
                 },
             }
         )
 
     if strategy_alignment:
-        children.append(
-            {
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {
-                    "rich_text": [
-                        {"type": "text", "text": {"content": "Стратегия и день"}}
-                    ]
+        children.extend(
+            [
+                {
+                    "object": "block",
+                    "type": "heading_3",
+                    "heading_3": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": "Стратегия и день"}}
+                        ]
+                    },
                 },
-            }
-        )
-        children.append(
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [
-                        {"type": "text", "text": {"content": strategy_alignment}}
-                    ]
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {"content": strategy_alignment},
+                            }
+                        ]
+                    },
                 },
-            }
+            ]
         )
 
     if daily_advice:
-        children.append(
-            {
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {
-                    "rich_text": [
-                        {"type": "text", "text": {"content": "Совет дня"}}
-                    ]
+        children.extend(
+            [
+                {
+                    "object": "block",
+                    "type": "heading_3",
+                    "heading_3": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": "Совет дня"}}
+                        ]
+                    },
                 },
-            }
-        )
-        children.append(
-            {
-                "object": "block",
-                "type": "paragraph",
-                "paragraph": {
-                    "rich_text": [
-                        {"type": "text", "text": {"content": daily_advice}}
-                    ]
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {"type": "text", "text": {"content": daily_advice}}
+                        ]
+                    },
                 },
-            }
+            ]
         )
 
     return create_page(DAILY_LOG_DB_ID, props, children)
@@ -578,6 +562,7 @@ def send_telegram_message(text: str):
         "text": text,
         "parse_mode": "Markdown",
     }
+
     try:
         res = requests.post(url, json=payload, timeout=15)
         if not res.ok:
@@ -592,6 +577,7 @@ def send_telegram_document(file_path: str, caption: str | None = None):
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+
     try:
         with open(file_path, "rb") as f:
             files = {"document": f}
@@ -606,64 +592,29 @@ def send_telegram_document(file_path: str, caption: str | None = None):
 
 
 def _truncate_for_discord(content: str, limit: int = 2000) -> str:
-    """
-    Discord message content must be <= 2000 chars.
-    Обрезаем, если нужно.
-    """
     if content is None:
         return ""
     if len(content) <= limit:
         return content
-    # небольшой запас под пометку
-    hard_limit = max(0, limit - 20)
-    return content[:hard_limit] + "\n...(truncated)..."
-
-
-def send_discord_message(content: str):
-    if not DISCORD_WEBHOOK_URL:
-        print("Discord not configured, skipping send_discord_message")
-        return
-    try:
-        safe_content = _truncate_for_discord(content or "")
-        res = requests.post(
-            DISCORD_WEBHOOK_URL, json={"content": safe_content}, timeout=15
-        )
-        if not res.ok:
-            print("Discord message error:", res.text)
-    except Exception as e:
-        print("Discord message exception:", e)
-
-
-def send_discord_file(file_path: str, content: str | None = None):
-    if not DISCORD_WEBHOOK_URL:
-        print("Discord not configured, skipping send_discord_file")
-        return
-    try:
-        with open(file_path, "rb") as f:
-            files = {"file": f}
-            data = {}
-            if content:
-                data["content"] = _truncate_for_discord(content)
-            res = requests.post(
-                DISCORD_WEBHOOK_URL, data=data, files=files, timeout=30
-            )
-        if not res.ok:
-            print("Discord file error:", res.text)
-    except Exception as e:
-        print("Discord file exception:", e)
-
+    return content[: limit - 20] + "\n...(truncated)..."
 
 # =========================================================
 # 📄 DOCX GENERATION
 # =========================================================
-def build_plan_docx(tomorrow, yesterday, tasks_tomorrow, plan_list, daily_advice):
-    filename = f"plan_{tomorrow.isoformat()}.docx"
+def build_plan_docx(
+    plan_day,
+    summary_day,
+    tasks_for_day,
+    plan_list,
+    daily_advice,
+):
+    filename = f"plan_{plan_day.isoformat()}.docx"
     doc = Document()
 
-    doc.add_heading(f"Plan for {tomorrow}", level=1)
+    doc.add_heading(f"Plan for {plan_day}", level=1)
 
-    # Plan-tomorrow текст
-    doc.add_heading("AI Plan for tomorrow", level=2)
+    # AI plan
+    doc.add_heading("AI Plan", level=2)
     if plan_list:
         for item in plan_list:
             doc.add_paragraph(item, style="List Bullet")
@@ -671,11 +622,11 @@ def build_plan_docx(tomorrow, yesterday, tasks_tomorrow, plan_list, daily_advice
         doc.add_paragraph("No explicit plan from AI.")
 
     # Tasks
-    doc.add_heading("Tasks for tomorrow", level=2)
-    if not tasks_tomorrow:
-        doc.add_paragraph("No tasks found for tomorrow.")
+    doc.add_heading("Tasks for the day", level=2)
+    if not tasks_for_day:
+        doc.add_paragraph("No tasks found.")
     else:
-        for t in tasks_tomorrow:
+        for t in tasks_for_day:
             name = t["name"]
             ttype = t["type"]
             planned = t["planned"]
@@ -683,8 +634,7 @@ def build_plan_docx(tomorrow, yesterday, tasks_tomorrow, plan_list, daily_advice
             advice = t.get("advice", "")
 
             p = doc.add_paragraph(style="List Number")
-            text = f"{name} [{ttype}] — {planned} min"
-            p.add_run(text).bold = True
+            p.add_run(f"{name} [{ttype}] — {planned} min").bold = True
 
             if comment:
                 doc.add_paragraph(f"AI comment: {comment}")
@@ -700,12 +650,11 @@ def build_plan_docx(tomorrow, yesterday, tasks_tomorrow, plan_list, daily_advice
 
 
 # =========================================================
-# 🌅 TASKS FOR TOMORROW: AI COMMENT + ADVICE
+# 🌅 TASKS FOR DAY: AI COMMENT + ADVICE
 # =========================================================
-def prepare_tasks_for_tomorrow(advice_lines):
-    tomorrow = get_tomorrow()
-    tasks = get_tasks_for_date(tomorrow)
-    print(f"Found {len(tasks)} tasks for tomorrow ({tomorrow})")
+def prepare_tasks_for_day(day, advice_lines):
+    tasks = get_tasks_for_date(day)
+    print(f"Found {len(tasks)} tasks for day ({day})")
 
     enriched = []
 
@@ -724,18 +673,18 @@ def prepare_tasks_for_tomorrow(advice_lines):
             print(f"AI comment failed for task '{name}': {e}")
             comment = ""
 
-        # Advice: пока просто один общий на день, так что тут пусто
-        advice = ""  # если захочешь — можно делать per-task
+        advice = ""
 
-        # пишем AI comment в Notion
-        page_id = task["id"]
+        # save AI comment to Notion
         try:
             update_page(
-                page_id,
+                task["id"],
                 {
                     "properties": {
                         "AI comment": {
-                            "rich_text": [{"text": {"content": comment or ""}}]
+                            "rich_text": [
+                                {"text": {"content": comment or ""}}
+                            ]
                         }
                     }
                 },
@@ -753,10 +702,8 @@ def prepare_tasks_for_tomorrow(advice_lines):
             }
         )
 
-    # Daily advice (общий один совет на день)
     daily_advice = pick_daily_advice(advice_lines)
-
-    return tomorrow, enriched, daily_advice
+    return enriched, daily_advice
 
 
 # =========================================================
@@ -764,60 +711,68 @@ def prepare_tasks_for_tomorrow(advice_lines):
 # =========================================================
 def main():
     today = get_today()
-    target_day = get_target_day_for_summary()
-    print(f"\n=== RUNNING DAILY JOB (today={today}, summary for={target_day}) ===\n")
+    summary_day = get_target_day_for_summary()  # ВЧЕРА
+    plan_day = today                             # СЕГОДНЯ
 
-    # 0) Загружаем линии советов (из файла заметок)
+    print(
+        f"\n=== RUNNING DAILY JOB "
+        f"(today={today}, summary_for={summary_day}, plan_for={plan_day}) ===\n"
+    )
+
+    # 0) Load advice
     advice_lines = load_advice_lines()
     if advice_lines:
-        print(f"Loaded {len(advice_lines)} advice lines from file")
+        print(f"Loaded {len(advice_lines)} advice lines")
     else:
-        print("No advice file or empty; daily advice will be empty")
+        print("No advice lines loaded")
 
-    # 1) Берём задачи за target_day (вчера), авто-роллим, считаем stats
-    tasks_yesterday = get_tasks_for_date(target_day)
-    print(f"Loaded {len(tasks_yesterday)} tasks for {target_day}")
+    # 1) Yesterday tasks → stats + autoroll
+    tasks_yesterday = get_tasks_for_date(summary_day)
+    print(f"Loaded {len(tasks_yesterday)} tasks for {summary_day}")
 
-    rolled = auto_roll_tasks(tasks_yesterday, target_day)
-    print(
-        f"Rolled over {rolled} tasks from {target_day} to {target_day + timedelta(days=1)}"
-    )
+    rolled = auto_roll_tasks(tasks_yesterday, summary_day)
+    print(f"Rolled over {rolled} tasks")
 
     stats = calculate_stats(tasks_yesterday)
     print("Stats:", stats)
 
-    # 2) Стратегия
+    # 2) Strategy snapshot
     strategy_snapshot = load_strategy_snapshot()
     print("Strategy snapshot loaded")
 
-    # 3) AI summary + plan
+    # 3) AI summary + PLAN НА СЕГОДНЯ
     summary, strategy_alignment, plan_list = generate_ai_summary_and_plan(
-        stats, target_day, strategy_snapshot
+        stats, summary_day, strategy_snapshot
     )
-    print("Summary + plan generated")
+    print("AI summary + plan generated")
 
-    # 4) Создаем запись в Daily Log
+    # 4) Daily log (за вчера)
     daily_advice_for_log = pick_daily_advice(advice_lines)
     daily_log_page = create_daily_log(
-        stats, summary, strategy_alignment, plan_list, target_day, daily_advice_for_log
+        stats,
+        summary,
+        strategy_alignment,
+        plan_list,
+        summary_day,
+        daily_advice_for_log,
     )
     print("Daily log created:", daily_log_page.get("id"))
 
-    # 5) Создаем/проверяем recurring tasks на завтра
-    tomorrow = get_tomorrow()
-    created_recurring = ensure_daily_recurring_tasks(tomorrow)
-    print(f"Created {created_recurring} recurring tasks for {tomorrow}")
+    # 5) Ensure recurring tasks НА СЕГОДНЯ (FIX)
+    created_recurring = ensure_daily_recurring_tasks(plan_day)
+    print(f"Created {created_recurring} recurring tasks for {plan_day}")
 
-    # 6) Подготавливаем задачи на завтра: AI comment + advice
-    tomorrow, tasks_tomorrow, daily_advice = prepare_tasks_for_tomorrow(advice_lines)
+    # 6) Prepare tasks НА СЕГОДНЯ (FIX)
+    tasks_today, daily_advice = prepare_tasks_for_day(plan_day, advice_lines)
     print(
-        f"Prepared {len(tasks_tomorrow)} tasks with AI comments for {tomorrow}; daily advice: {bool(daily_advice)}"
+        f"Prepared {len(tasks_today)} tasks for {plan_day}; "
+        f"daily advice: {bool(daily_advice)}"
     )
 
-    # 7) Формируем и отправляем текстовый план в Telegram / Discord
-    if tasks_tomorrow:
-        lines = [f"*План задач на {tomorrow}:*"]
-        for t in tasks_tomorrow:
+    # 7) Send plan message
+    if tasks_today:
+        lines = [f"*План задач на {plan_day}:*"]
+        for t in tasks_today:
             line = f"- *{t['name']}* [{t['type']}] — {t['planned']} мин"
             if t["comment"]:
                 line += f"\n    _{t['comment']}_"
@@ -826,25 +781,25 @@ def main():
             lines.append(f"\n*Совет дня:* {daily_advice}")
         tasks_message = "\n".join(lines)
     else:
-        tasks_message = f"На {tomorrow} задач не найдено."
+        tasks_message = f"На {plan_day} задач не найдено."
         if daily_advice:
             tasks_message += f"\n\nСовет дня: {daily_advice}"
 
     send_telegram_message(tasks_message)
     send_discord_message(tasks_message)
 
-    # 8) Генерим docx и шлём файл
+    # 8) DOCX
     docx_path = build_plan_docx(
-        tomorrow=tomorrow,
-        yesterday=target_day,
-        tasks_tomorrow=tasks_tomorrow,
+        plan_day=plan_day,
+        summary_day=summary_day,
+        tasks_for_day=tasks_today,
         plan_list=plan_list,
         daily_advice=daily_advice,
     )
     print("DOCX generated:", docx_path)
 
-    send_telegram_document(docx_path, caption=f"План на {tomorrow}")
-    send_discord_file(docx_path, content=f"План на {tomorrow}")
+    send_telegram_document(docx_path, caption=f"План на {plan_day}")
+    send_discord_file(docx_path, content=f"План на {plan_day}")
 
     print("\n=== DONE ===\n")
 
