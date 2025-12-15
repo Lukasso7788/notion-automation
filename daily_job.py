@@ -813,15 +813,15 @@ def main():
     tasks_count = len(tasks_today)
     planned_minutes = sum(t["planned"] for t in tasks_today)
 
-short_message = (
-    f"📅 *План на {plan_day}*\n\n"
-    f"• Задач: {tasks_count}\n"
-    f"• Планируемое время: {planned_minutes} мин\n\n"
-    f"📄 Подробный план — в документе ниже"
-)
+    short_message = (
+        f"📅 *План на {plan_day}*\n\n"
+        f"• Задач: {tasks_count}\n"
+        f"• Планируемое время: {planned_minutes} мин\n\n"
+        f"📄 Подробный план — в документе ниже"
+    )
 
-send_telegram_message(short_message)
-send_discord_message(short_message)
+    send_telegram_message(short_message)
+    send_discord_message(short_message)
 
 
     # 8) DOCX
