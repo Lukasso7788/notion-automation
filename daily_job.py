@@ -598,6 +598,46 @@ def _truncate_for_discord(content: str, limit: int = 2000) -> str:
         return content
     return content[: limit - 20] + "\n...(truncated)..."
 
+def send_discord_message(content: str):
+    if not DISCORD_WEBHOOK_URL:
+        print("Discord not configured, skipping send_discord_message")
+        return
+
+    try:
+        safe_content = _truncate_for_discord(content or "")
+        res = requests.post(
+            DISCORD_WEBHOOK_URL,
+            json={"content": safe_content},
+            timeout=15,
+        )
+        if not res.ok:
+            print("Discord send message error:", res.text)
+    except Exception as e:
+        print("Discord send message exception:", e)
+
+
+def send_discord_file(file_path: str, content: str | None = None):
+    if not DISCORD_WEBHOOK_URL:
+        print("Discord not configured, skipping send_discord_file")
+        return
+
+    try:
+        with open(file_path, "rb") as f:
+            files = {"file": f}
+            data = {}
+            if content:
+                data["content"] = _truncate_for_discord(content)
+            res = requests.post(
+                DISCORD_WEBHOOK_URL,
+                data=data,
+                files=files,
+                timeout=30,
+            )
+        if not res.ok:
+            print("Discord send file error:", res.text)
+    except Exception as e:
+        print("Discord send file exception:", e)
+
 # =========================================================
 # 📄 DOCX GENERATION
 # =========================================================
@@ -769,24 +809,20 @@ def main():
         f"daily advice: {bool(daily_advice)}"
     )
 
-    # 7) Send plan message
-    if tasks_today:
-        lines = [f"*План задач на {plan_day}:*"]
-        for t in tasks_today:
-            line = f"- *{t['name']}* [{t['type']}] — {t['planned']} мин"
-            if t["comment"]:
-                line += f"\n    _{t['comment']}_"
-            lines.append(line)
-        if daily_advice:
-            lines.append(f"\n*Совет дня:* {daily_advice}")
-        tasks_message = "\n".join(lines)
-    else:
-        tasks_message = f"На {plan_day} задач не найдено."
-        if daily_advice:
-            tasks_message += f"\n\nСовет дня: {daily_advice}"
+    # 7) Send SHORT plan message (Telegram / Discord)
+    tasks_count = len(tasks_today)
+    planned_minutes = sum(t["planned"] for t in tasks_today)
 
-    send_telegram_message(tasks_message)
-    send_discord_message(tasks_message)
+short_message = (
+    f"📅 *План на {plan_day}*\n\n"
+    f"• Задач: {tasks_count}\n"
+    f"• Планируемое время: {planned_minutes} мин\n\n"
+    f"📄 Подробный план — в документе ниже"
+)
+
+send_telegram_message(short_message)
+send_discord_message(short_message)
+
 
     # 8) DOCX
     docx_path = build_plan_docx(
